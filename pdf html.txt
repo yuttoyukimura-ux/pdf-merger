@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF結合ツール（ドラッグ並び替え対応・番号なし）</title>
+    <!-- PDF処理用ライブラリ -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1"></script>
+    <!-- ドラッグ＆ドロップ並び替え用ライブラリ -->
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    <style>
+        body { 
+            font-family: sans-serif; 
+            padding: 30px; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            background-color: #f9f9f9;
+        }
+        .container { 
+            background-color: white;
+            border: 1px solid #ddd; 
+            padding: 25px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        input[type="file"] { 
+            margin-bottom: 15px; 
+            display: block;
+        }
+        /* リストのスタイル */
+        #file-list { 
+            list-style: none; 
+            padding: 0; 
+            margin: 0 0 20px 0; 
+        }
+        #file-list li { 
+            display: flex; 
+            align-items: center; 
+            padding: 10px; 
+            background: #f8f9fa; 
+            margin-bottom: 8px; 
+            border-radius: 4px; 
+            border: 1px solid #e0e0e0;
+            transition: box-shadow 0.2s;
+        }
+        /* ドラッグ中の見た目 */
+        #file-list li.sortable-ghost {
+            opacity: 0.4;
+            background-color: #e2eafc;
+        }
+        .drag-handle {
+            cursor: grab;
+            font-size: 20px;
+            color: #999;
+            margin-right: 15px;
+            user-select: none;
+        }
+        .drag-handle:active {
+            cursor: grabbing;
+        }
+        .file-name { 
+            flex-grow: 1; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            white-space: nowrap; 
+            font-size: 14px;
+        }
+        .controls {
+            margin-left: 10px;
+        }
+        .controls button.delete { 
+            padding: 5px 10px; 
+            border: 1px solid #ccc; 
+            background: white; 
+            border-radius: 4px; 
+            cursor: pointer;
+            color: #dc3545; 
+            font-weight: bold; 
+        }
+        .controls button.delete:hover { background: #fee; }
+        
+        button.main-btn { 
+            padding: 12px 20px; 
+            background-color: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            font-size: 16px; 
+            width: 100%;
+        }
+        button.main-btn:hover { background-color: #0056b3; }
+        button.main-btn:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        #status { 
+            margin-top: 15px; 
+            font-weight: bold; 
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>PDF結合ツール</h2>
+        <p>ファイルを追加し、左端の「≡」をドラッグして順番を整理してください。</p>
+        
+        <input type="file" id="pdf-upload" accept="application/pdf" multiple onchange="handleFiles()">
+        
+        <ul id="file-list"></ul>
+        
+        <button id="merge-btn" class="main-btn" onclick="mergePDFs()" disabled>上から順番に結合してダウンロード</button>
+        
+        <div id="status"></div>
+    </div>
+
+    <script>
+        let filesArray = [];
+        let sortableInstance = null;
+
+        function handleFiles() {
+            const fileInput = document.getElementById('pdf-upload');
+            for (let i = 0; i < fileInput.files.length; i++) {
+                filesArray.push(fileInput.files[i]);
+            }
+            fileInput.value = '';
+            renderList();
+        }
+
+        function renderList() {
+            const list = document.getElementById('file-list');
+            const mergeBtn = document.getElementById('merge-btn');
+            list.innerHTML = '';
+
+            filesArray.forEach((file, index) => {
+                const li = document.createElement('li');
+                
+                // ドラッグ用のつまみ（≡）
+                const handle = document.createElement('span');
+                handle.className = 'drag-handle';
+                handle.textContent = '≡';
+                li.appendChild(handle);
+
+                // ファイル名（番号表示を削除しました）
+                const span = document.createElement('span');
+                span.className = 'file-name';
+                span.textContent = file.name;
+                li.appendChild(span);
+
+                // 削除ボタン
+                const controls = document.createElement('div');
+                controls.className = 'controls';
+                const delBtn = document.createElement('button');
+                delBtn.textContent = '✕';
+                delBtn.className = 'delete';
+                delBtn.onclick = () => removeFile(index);
+                controls.appendChild(delBtn);
+
+                li.appendChild(controls);
+                list.appendChild(li);
+            });
+
+            mergeBtn.disabled = filesArray.length < 2;
+            document.getElementById('status').textContent = '';
+
+            initSortable();
+        }
+
+        function initSortable() {
+            const list = document.getElementById('file-list');
+            
+            if (sortableInstance) {
+                sortableInstance.destroy();
+            }
+
+            sortableInstance = Sortable.create(list, {
+                handle: '.drag-handle',
+                animation: 150,
+                onEnd: function (evt) {
+                    const movedItem = filesArray.splice(evt.oldIndex, 1)[0];
+                    filesArray.splice(evt.newIndex, 0, movedItem);
+                }
+            });
+        }
+
+        function removeFile(index) {
+            filesArray.splice(index, 1);
+            renderList();
+        }
+
+        async function mergePDFs() {
+            const statusDiv = document.getElementById('status');
+            if (filesArray.length < 2) return;
+
+            statusDiv.textContent = "結合処理中...";
+            statusDiv.style.color = "blue";
+
+            try {
+                const { PDFDocument } = PDFLib;
+                const mergedPdf = await PDFDocument.create();
+
+                for (let i = 0; i < filesArray.length; i++) {
+                    const file = filesArray[i];
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await PDFDocument.load(arrayBuffer);
+                    const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                    copiedPages.forEach((page) => mergedPdf.addPage(page));
+                }
+
+                const mergedPdfFile = await mergedPdf.save();
+                const blob = new Blob([mergedPdfFile], { type: "application/pdf" });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = "merged.pdf";
+                link.click();
+
+                statusDiv.textContent = "結合が完了しました！";
+                statusDiv.style.color = "green";
+            } catch (error) {
+                console.error(error);
+                statusDiv.textContent = "エラーが発生しました。暗号化されたPDFなどが含まれていないか確認してください。";
+                statusDiv.style.color = "red";
+            }
+        }
+    </script>
+</body>
+</html>
